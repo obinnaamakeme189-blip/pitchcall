@@ -19,11 +19,19 @@ const TOP = [39, 140, 135, 78, 61, 2, 3, 848, 5, 40, 88, 94, 253, 332, 6, 36, 1,
 
 if (!KEY) console.warn('Missing API_FOOTBALL_KEY. Fixtures will not update.');
 
-async function api(endpoint) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const GAP = 7000; // free plan allows 10 requests/minute, so 1 request every 7s
+
+async function api(endpoint, tries = 3) {
+  await sleep(GAP);
   const r = await fetch(BASE + endpoint, { headers: { 'x-apisports-key': KEY } });
+  if (r.status === 429 && tries > 1) { await sleep(20000); return api(endpoint, tries - 1); }
   if (!r.ok) throw new Error(endpoint + ' -> ' + r.status);
   const j = await r.json();
-  if (j.errors && Object.keys(j.errors).length) console.warn(endpoint, JSON.stringify(j.errors));
+  if (j.errors && Object.keys(j.errors).length) {
+    console.warn(endpoint, JSON.stringify(j.errors));
+    if (j.errors.rateLimit && tries > 1) { await sleep(20000); return api(endpoint, tries - 1); }
+  }
   return j.response || [];
 }
 
@@ -46,30 +54,33 @@ async function refresh() {
   const rank = (fx) => { const i = TOP.indexOf(fx.league.id); return i === -1 ? 999 : i; };
   all.sort((a, b) => rank(a) - rank(b) || new Date(a.fixture.date) - new Date(b.fixture.date));
 
-  const out = [];
+  const toItem = (fx, p) => ({
+    id: String(fx.fixture.id),
+    league: fx.league.name + (fx.league.country && fx.league.country !== 'World' ? ' (' + fx.league.country + ')' : ''),
+    home: fx.teams.home.name,
+    away: fx.teams.away.name,
+    ko: new Date(fx.fixture.date).toISOString(),
+    p: p || [40, 27, 33],
+    est: !p,
+  });
+
+  const out = all.map((fx) => toItem(fx, null));
+  fs.writeFileSync(CACHE, JSON.stringify(out)); // site has matches straight away
+  console.log('Saved', out.length, 'fixtures (estimates), adding predictions...');
+
   let budget = MAX_PREDICTIONS;
-  for (const fx of all) {
-    let p = null;
-    if (budget > 0 && rank(fx) < 999) {
-      try {
-        const pr = await api('/predictions?fixture=' + fx.fixture.id);
-        budget--;
-        const pc = pr[0] && pr[0].predictions && pr[0].predictions.percent;
-        if (pc) p = [num(pc.home), num(pc.draw), num(pc.away)];
-      } catch (e) { console.error(e.message); }
-    }
-    out.push({
-      id: String(fx.fixture.id),
-      league: fx.league.name + (fx.league.country && fx.league.country !== 'World' ? ' (' + fx.league.country + ')' : ''),
-      home: fx.teams.home.name,
-      away: fx.teams.away.name,
-      ko: new Date(fx.fixture.date).toISOString(),
-      p: p || [40, 27, 33],
-      est: !p, // true = no real prediction, estimate only
-    });
+  for (let i = 0; i < all.length && budget > 0; i++) {
+    if (rank(all[i]) === 999) continue;
+    try {
+      const pr = await api('/predictions?fixture=' + all[i].fixture.id);
+      budget--;
+      const pc = pr[0] && pr[0].predictions && pr[0].predictions.percent;
+      if (pc) out[i] = toItem(all[i], [num(pc.home), num(pc.draw), num(pc.away)]);
+    } catch (e) { console.error(e.message); }
+    if (i % 10 === 9) fs.writeFileSync(CACHE, JSON.stringify(out));
   }
   fs.writeFileSync(CACHE, JSON.stringify(out));
-  console.log('Saved', out.length, 'fixtures');
+  console.log('Done. Predictions added.');
 }
 
 const app = express();
