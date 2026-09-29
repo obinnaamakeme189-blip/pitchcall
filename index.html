@@ -230,7 +230,7 @@ const dlabel=k=>{
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 /* ---------- RENDER ---------- */
-function days(){return [...new Set(FIX.map(f=>dkey(f.ko)))].sort()}
+function days(){const n=Date.now();return [...new Set(FIX.filter(f=>new Date(f.ko).getTime()>n).map(f=>dkey(f.ko)))].sort()}
 function pickDefaultDay(){
   const t=dkey(new Date().toISOString()),ds=days();
   return ds.find(d=>d>=t)||ds[ds.length-1];
@@ -262,7 +262,7 @@ function card(f,opts){
   }).join('');
   const csHtml=`<h4>Likely correct scores</h4><div class="grid">${a.cs.map(q=>`<div class="mk"><span>${q[0]}</span><b>${(q[1]*100).toFixed(1)}%</b></div>`).join('')}</div>`;
   c.innerHTML=`<button aria-expanded="false">
-    <div class="meta"><span>${esc(f.league)}</span><span>${tm(f.ko)}</span></div>
+    <div class="meta"><span>${esc(f.league)}</span><span>${f.est?'Estimate · ':''}${tm(f.ko)}</span></div>
     <div class="teams">${esc(f.home)}<br>${esc(f.away)}</div>
     <div class="cells" style="grid-template-columns:repeat(${cells.length},1fr)">${cellsHtml}</div>
     <div class="pick"><strong>Pick: ${esc(pk.text)}</strong><div class="bar"><i style="width:${Math.round(pk.p*100)}%"></i></div><strong>${pct(pk.p)}</strong></div>
@@ -273,7 +273,7 @@ function card(f,opts){
 }
 function renderMatches(){
   const list=$('list');list.innerHTML='';
-  let fx=FIX.filter(f=>dkey(f.ko)===S.day&&(S.league==='All'||f.league===S.league));
+  let fx=FIX.filter(f=>dkey(f.ko)===S.day&&new Date(f.ko).getTime()>Date.now()&&(S.league==='All'||f.league===S.league));
   fx.sort((a,b)=>a.ko.localeCompare(b.ko));
   if(!fx.length){list.innerHTML='<div class="empty">No matches for this filter. Pick another date or league.</div>';return}
   const groups={};fx.forEach(f=>(groups[f.league]=groups[f.league]||[]).push(f));
@@ -287,7 +287,7 @@ function renderVip(){
   const box=$('viplist');box.innerHTML='';
   if(!S.vip)return;
   const t=dkey(new Date().toISOString());
-  let pool=FIX.filter(f=>dkey(f.ko)>=t);
+  let pool=FIX.filter(f=>dkey(f.ko)>=t&&!f.est&&new Date(f.ko).getTime()>Date.now());
   const first=pool.map(f=>dkey(f.ko)).sort()[0];
   pool=pool.filter(f=>dkey(f.ko)===first);
   const picks=pool.map(f=>({f,s:safest(f,f.a)})).filter(x=>x.s.p>=0.8).sort((a,b)=>b.s.p-a.s.p).slice(0,6);
